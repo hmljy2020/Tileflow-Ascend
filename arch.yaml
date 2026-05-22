@@ -1,0 +1,69 @@
+architecture:
+  # Pure graph architecture draft for the planned TileFlow-Ascend backend.
+  # Nodes describe storage and compute resources. Directed edges describe
+  # legal data movement paths and their optional transfer capabilities.
+  version: 0.4-ascend-graph
+
+  nodes:
+  - name: GM
+    kind: buffer
+    class: DRAM
+    role: out
+    attributes:
+      word-bits: 16
+
+  - name: L1
+    kind: buffer
+    class: SRAM
+    attributes:
+      word-bits: 16
+
+  - name: L0
+    kind: buffer
+    class: SRAM
+    attributes:
+      word-bits: 16
+
+  - name: UB
+    kind: buffer
+    class: SRAM
+    attributes:
+      word-bits: 16
+
+  - name: Cube
+    kind: compute
+    class: Cube
+    attributes:
+      primitive: matmul16x16x16
+
+  - name: Vec
+    kind: compute
+    class: Vec
+    attributes:
+      primitive: elementwise_exp
+
+  edges:
+  - name: gm_to_l1
+    from: GM
+    to: L1
+    kind: load
+
+  - name: l1_to_l0
+    from: L1
+    to: L0
+    kind: load
+
+  - name: l0_to_gm_bypass
+    from: L0
+    to: GM
+    kind: bypass
+
+  - name: gm_to_ub
+    from: GM
+    to: UB
+    kind: load
+
+  - name: ub_to_gm
+    from: UB
+    to: GM
+    kind: store

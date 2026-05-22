@@ -1,0 +1,49 @@
+problem:
+  # Semantic problem draft for the planned TileFlow-Ascend backend.
+  # This follows the current TileFlow tutorial problem shape as closely as
+  # possible while keeping ExpP as an explicit unary operation.
+  io:
+    ins: Q, K
+    outs: S
+
+  dimensions: [M, N, D]
+
+  instance:
+    M: 4096
+    N: 4096
+    D: 64
+
+  ops:
+  - name: MatmulP
+    dimensions: [M, N, D]
+    data-spaces:
+    - name: P
+      projection:
+        - [[M]]
+        - [[N]]
+      read-write: True
+    - name: Q
+      projection:
+        - [[M]]
+        - [[D]]
+    - name: K
+      projection:
+        - [[D]]
+        - [[N]]
+    ins: Q, K
+    out: P
+
+  - name: ExpP
+    dimensions: [M, N]
+    data-spaces:
+    - name: S
+      projection:
+        - [[M]]
+        - [[N]]
+      read-write: True
+    - name: P
+      projection:
+        - [[M]]
+        - [[N]]
+    ins: P
+    out: S

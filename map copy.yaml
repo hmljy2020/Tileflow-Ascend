@@ -1,0 +1,39 @@
+mapping:  # P[l, l]=Q[l, d]@K[d, l], S[l, l]=Exp(P[l, l])
+  node-type: Tile 
+  type: spatial # 24 Cube + 48 Vec 
+  factors: L=2048 # l*d=2048*d tile send to 1 Cube + 2 Vec 
+  target: GlobalMemory 
+
+  subtree: 
+  - node-type: Scope 
+    type: Pipeline 
+
+    subtree:
+    - node-type: Tile 
+      factors: L=256 # still on GM, smaller tile to Cube
+      type: temporal 
+      target: GlobalMemory
+
+      subtree:
+      - node-type: Tile
+        type: temporal
+        factors: L=256
+        target: L1
+
+        subtree:
+        - node-type: Tile 
+          type: temporal 
+          factors: L=256
+          target: L0
+
+          subtree:
+          # compute P=Q@K
+        
+    subtree:
+    - node-type: Tile
+      factors: L=1024
+      type: spatial # 2 Vec process 2 * l*d=2 * 1024*d tiles
+      target: UB
+
+      subtree:
+      # compute S=Exp(P)

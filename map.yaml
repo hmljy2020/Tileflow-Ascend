@@ -1,0 +1,61 @@
+mapping:
+  # Semantic mapping draft for:
+  #   P[M, N] = Q[M, D] @ K[D, N]
+  #   S[M, N] = Exp(P[M, N])
+  #
+  # Tile fields:
+  #   receive_tile: tile size received and processed by this level per step.
+  #   factors:      tile size forwarded from this level to its child per step.
+  #
+  # Therefore receive_tile / factors generates this Tile's internal loop.
+  version: 0.3-ascend-semantic
+
+  node-type: Tile
+  type: temporal
+  target: GM
+  factors: M=2048 N=128 D=64
+
+  subtree:
+  - node-type: Tile
+    name: CoreGroup
+    type: spatial
+    target: Core
+    factors: M=2048 N=128 D=64
+
+    subtree:
+    - node-type: Scope
+      name: CubeThenVec
+      type: Pipeline
+
+      subtree:
+      - node-type: Tile
+        type: temporal
+        target: L1
+        receive_tile: M=256 N=128 D=64
+        factors: M=256 N=128 D=64
+
+        subtree:
+        - node-type: Tile
+          type: temporal
+          target: L0
+          factors: M=256 N=128 D=64
+
+          subtree:
+          - node-type: Op
+            name: MatmulP
+
+      - node-type: Tile
+        name: VecLaneGroup
+        type: spatial
+        target: VecLane
+        factors: M=1024 N=128
+
+        subtree:
+        - node-type: Tile
+          type: temporal
+          target: UB
+          factors: M=1024 N=128
+
+          subtree:
+          - node-type: Op
+            name: ExpP
