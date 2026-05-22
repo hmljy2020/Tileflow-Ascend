@@ -19,7 +19,7 @@ mapping:
   - node-type: Tile
     name: CoreGroup
     type: spatial
-    target: Core
+    target: AICore
     factors: M=2048 N=128 D=64
 
     subtree:
@@ -47,7 +47,7 @@ mapping:
       - node-type: Tile
         name: VecLaneGroup
         type: spatial
-        target: VecLane
+        target: VecCore
         factors: M=1024 N=128
 
         subtree:

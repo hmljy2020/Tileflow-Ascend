@@ -1,8 +1,8 @@
 architecture:
-  # Pure graph architecture draft for the planned TileFlow-Ascend backend.
-  # Nodes describe storage and compute resources. Directed edges describe
-  # legal data movement paths and their optional transfer capabilities.
-  version: 0.4-ascend-graph
+  # Pure data graph plus concept hierarchy for TileFlow-Ascend.
+  # Resource nodes participate in data routing. Concept nodes describe
+  # placement domains and multiplicity for spatial tile decomposition.
+  version: 0.5-ascend-concept-graph
 
   nodes:
   - name: GM
@@ -41,6 +41,44 @@ architecture:
     class: Vec
     attributes:
       primitive: elementwise_exp
+
+  - name: CubeCore
+    kind: concept
+    contains:
+    - ref: L1
+    - ref: L0
+    - ref: Cube
+    roles:
+      input_buffer: L1
+      compute_buffer: L0
+      compute: Cube
+
+  - name: VecCore
+    kind: concept
+    contains:
+    - ref: UB
+    - ref: Vec
+    roles:
+      compute_buffer: UB
+      compute: Vec
+
+  - name: AICore
+    kind: concept
+    contains:
+    - ref: CubeCore
+      count: 1
+    - ref: VecCore
+      count: 2
+
+  - name: Device
+    kind: concept
+    contains:
+    - ref: GM
+      count: 1
+    - ref: AICore
+      count: 24
+    roles:
+      global_buffer: GM
 
   edges:
   - name: gm_to_l1
