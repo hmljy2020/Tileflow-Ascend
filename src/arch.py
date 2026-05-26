@@ -14,15 +14,52 @@ from .ir import (
     TensorInfo,
     TransferEdge,
 )
-from .loops import compile_mapping_loops
 
 
 def _as_positive_int(value: Any, field_name: str) -> int:
     if value is None:
         return 1
-    if isinstance(value, int) and value > 0:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value
     raise ValueError(f"{field_name} must be a positive integer")
+
+
+def _as_required_positive_int(value: Any, field_name: str) -> int:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    raise ValueError(f"{field_name} must be a positive integer")
+
+
+def _validate_buffer_size(attributes: dict[str, Any], field_name: str) -> None:
+    if "word-bits" in attributes:
+        raise ValueError(f"{field_name}.word-bits is not supported; use size only")
+    if "size" not in attributes:
+        raise ValueError(f"{field_name}.size is required for buffer nodes")
+    size = attributes["size"]
+    if isinstance(size, bool) or not isinstance(size, (int, float, str)) or size == "":
+        raise ValueError(f"{field_name}.size must be a scalar value")
+
+
+def _parse_contains(
+    contains_spec: Any,
+    field_name: str,
+) -> list[ConceptChild]:
+    if contains_spec is None:
+        contains_spec = []
+    if not isinstance(contains_spec, list):
+        raise ValueError(f"{field_name} must be a list")
+
+    contains: list[ConceptChild] = []
+    for child_index, child_spec in enumerate(contains_spec):
+        child_field = f"{field_name}[{child_index}]"
+        if not isinstance(child_spec, dict):
+            raise ValueError(f"{child_field} must be a mapping")
+        ref = child_spec.get("ref")
+        if not isinstance(ref, str) or not ref:
+            raise ValueError(f"{child_field}.ref must be a non-empty string")
+        count = _as_positive_int(child_spec.get("count"), f"{child_field}.count")
+        contains.append(ConceptChild(ref=ref, count=count))
+    return contains
 
 
 def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
@@ -33,6 +70,9 @@ def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
     node_specs = architecture.get("nodes")
     if not isinstance(node_specs, list):
         raise ValueError("architecture.nodes must be a list")
+    concept_specs = architecture.get("concepts")
+    if not isinstance(concept_specs, list):
+        raise ValueError("architecture.concepts must be a list")
 
     nodes: dict[str, ArchNode] = {}
     out_nodes: list[str] = []
@@ -44,61 +84,38 @@ def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
         kind = spec.get("kind")
         class_name = spec.get("class", "")
         role = spec.get("role", "")
+        count = spec.get("count")
         attributes = spec.get("attributes", {})
-        contains_spec = spec.get("contains", [])
-        roles = spec.get("roles", {})
         if not isinstance(name, str) or not name:
             raise ValueError(f"architecture.nodes[{index}].name must be a non-empty string")
         if name in nodes:
             raise ValueError(f"architecture.nodes contains duplicate node '{name}'")
-        if not isinstance(kind, str) or kind not in {"buffer", "compute", "concept"}:
+        if not isinstance(kind, str) or kind not in {"buffer", "compute"}:
             raise ValueError(
-                f"architecture.nodes[{index}].kind must be 'buffer', 'compute', or 'concept'"
+                f"architecture.nodes[{index}].kind must be 'buffer' or 'compute'"
             )
         if not isinstance(class_name, str):
             raise ValueError(f"architecture.nodes[{index}].class must be a string")
         if not isinstance(role, str):
             raise ValueError(f"architecture.nodes[{index}].role must be a string")
+        count = _as_required_positive_int(count, f"architecture.nodes[{index}].count")
         if not isinstance(attributes, dict):
             raise ValueError(f"architecture.nodes[{index}].attributes must be a mapping")
-        if contains_spec is None:
-            contains_spec = []
-        if not isinstance(contains_spec, list):
-            raise ValueError(f"architecture.nodes[{index}].contains must be a list")
-        if not isinstance(roles, dict) or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in roles.items()
-        ):
-            raise ValueError(f"architecture.nodes[{index}].roles must map strings to strings")
-        if kind != "concept" and contains_spec:
+        if spec.get("contains"):
             raise ValueError(f"architecture.nodes[{index}].contains is only valid on concept nodes")
-
-        contains: list[ConceptChild] = []
-        for child_index, child_spec in enumerate(contains_spec):
-            if not isinstance(child_spec, dict):
-                raise ValueError(
-                    f"architecture.nodes[{index}].contains[{child_index}] must be a mapping"
-                )
-            ref = child_spec.get("ref")
-            if not isinstance(ref, str) or not ref:
-                raise ValueError(
-                    f"architecture.nodes[{index}].contains[{child_index}].ref "
-                    "must be a non-empty string"
-                )
-            count = _as_positive_int(
-                child_spec.get("count"),
-                f"architecture.nodes[{index}].contains[{child_index}].count",
-            )
-            contains.append(ConceptChild(ref=ref, count=count))
+        if "roles" in spec:
+            raise ValueError("architecture.nodes roles are not supported")
+        if kind == "buffer":
+            _validate_buffer_size(attributes, f"architecture.nodes[{index}].attributes")
 
         nodes[name] = ArchNode(
             name=name,
             kind=kind,
             class_name=class_name,
             role=role,
+            count=count,
             attributes=dict(attributes),
-            contains=contains,
-            roles=dict(roles),
+            contains=[],
         )
         if role == "out":
             out_nodes.append(name)
@@ -108,6 +125,32 @@ def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
     if nodes[out_nodes[0]].kind != "buffer":
         raise ValueError("architecture role: out node must be a buffer")
 
+    for index, spec in enumerate(concept_specs):
+        if not isinstance(spec, dict):
+            raise ValueError(f"architecture.concepts[{index}] must be a mapping")
+
+        name = spec.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"architecture.concepts[{index}].name must be a non-empty string")
+        if name in nodes:
+            raise ValueError(f"architecture contains duplicate node '{name}'")
+        if "roles" in spec:
+            raise ValueError("architecture.concepts roles are not supported")
+        contains = _parse_contains(
+            spec.get("contains", []),
+            f"architecture.concepts[{index}].contains",
+        )
+
+        nodes[name] = ArchNode(
+            name=name,
+            kind="concept",
+            class_name="",
+            role="",
+            count=1,
+            attributes={},
+            contains=contains,
+        )
+
     referenced_by_concept: set[str] = set()
     for node in nodes.values():
         if node.kind != "concept":
@@ -115,16 +158,8 @@ def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
         for child in node.contains:
             if child.ref not in nodes:
                 raise ValueError(f"Concept node '{node.name}' contains unknown node '{child.ref}'")
-            referenced_by_concept.add(child.ref)
-        for role_name, ref in node.roles.items():
-            if ref not in nodes:
-                raise ValueError(
-                    f"Concept node '{node.name}' role '{role_name}' names unknown node '{ref}'"
-                )
-            if nodes[ref].kind == "concept":
-                raise ValueError(
-                    f"Concept node '{node.name}' role '{role_name}' must name a resource node"
-                )
+            if nodes[child.ref].kind == "concept":
+                referenced_by_concept.add(child.ref)
 
     resource_nodes = {
         name: node for name, node in nodes.items() if node.kind in {"buffer", "compute"}
@@ -136,7 +171,7 @@ def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
         name for name in concept_nodes if name not in referenced_by_concept
     ]
     if len(root_concepts) != 1:
-        raise ValueError("architecture.nodes must contain exactly one root concept node")
+        raise ValueError("architecture.concepts must contain exactly one root concept node")
 
     graph = ArchGraph(
         nodes=nodes,

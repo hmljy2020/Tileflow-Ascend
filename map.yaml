@@ -11,16 +11,13 @@ mapping:
   version: 0.3-ascend-semantic
 
   node-type: Tile
-  type: temporal
+  type: spatial
   target: GM
   factors: M=2048 N=128 D=64
 
   subtree:
   - node-type: Tile
-    name: CoreGroup
-    type: spatial
     target: AICore
-    factors: M=2048 N=128 D=64
 
     subtree:
     - node-type: Scope

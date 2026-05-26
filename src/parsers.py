@@ -51,6 +51,19 @@ def _parse_factor_map(value: Any, field_name: str) -> dict[str, Any]:
     raise ValueError(f"{field_name} must be a mapping or name=value string")
 
 
+def _as_positive_int_map(value: Any, field_name: str) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a mapping")
+    result: dict[str, int] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError(f"{field_name} keys must be non-empty strings")
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            raise ValueError(f"{field_name}.{key} must be a positive integer")
+        result[key] = item
+    return result
+
+
 def parse_problem(prob_yaml: dict[str, Any]) -> ProblemInfo:
     problem = prob_yaml.get("problem")
     if not isinstance(problem, dict):
@@ -62,6 +75,13 @@ def parse_problem(prob_yaml: dict[str, Any]) -> ProblemInfo:
 
     inputs = _as_name_list(io.get("ins"), "problem.io.ins")
     outputs = _as_name_list(io.get("outs"), "problem.io.outs")
+    dimensions = _as_name_list(problem.get("dimensions"), "problem.dimensions")
+    instance = _as_positive_int_map(problem.get("instance"), "problem.instance")
+    if not dimensions:
+        dimensions = list(instance)
+    for dimension in dimensions:
+        if dimension not in instance:
+            raise ValueError(f"problem.instance must define dimension '{dimension}'")
 
     op_specs = problem.get("ops", [])
     if not isinstance(op_specs, list):
@@ -83,7 +103,13 @@ def parse_problem(prob_yaml: dict[str, Any]) -> ProblemInfo:
 
         ops[name] = OpInfo(name=name, inputs=op_inputs, output=op_outputs[0], map_path="")
 
-    return ProblemInfo(inputs=inputs, outputs=outputs, ops=ops)
+    return ProblemInfo(
+        inputs=inputs,
+        outputs=outputs,
+        dimensions=dimensions,
+        instance=instance,
+        ops=ops,
+    )
 
 
 def collect_mapping_ops(map_yaml: dict[str, Any], problem: ProblemInfo) -> list[OpInfo]:

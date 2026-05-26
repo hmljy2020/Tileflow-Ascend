@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from typing import Any
 
 from .arch import (
@@ -12,8 +11,16 @@ from .arch import (
     build_producer_table,
     route_edges_to_paths,
 )
-from .ir import ArchGraph, LoopInfo, RoutedTensorEdge, TensorEdge, TensorInfo
-from .loops import compile_mapping_loops
+from .ir import (
+    ArchGraph,
+    LoopBlock,
+    LoopDescriptor,
+    LoopProgram,
+    RoutedTensorEdge,
+    TensorEdge,
+    TensorInfo,
+)
+from .loops import compile_loop_program, render_loop_pseudocode
 from .parsers import collect_mapping_ops, load_yaml, parse_problem
 
 
@@ -40,22 +47,40 @@ def _route_json(route: RoutedTensorEdge) -> dict[str, Any]:
     }
 
 
-def _loop_json(loop: LoopInfo) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "kind": loop.kind,
+def _loop_descriptor_json(loop: LoopDescriptor) -> dict[str, Any]:
+    return {
+        "dimension": loop.dimension,
+        "start": loop.start,
+        "end": loop.end,
+        "step": loop.step,
+        "var": loop.var,
+        "spacetime": loop.spacetime,
+        "phase": loop.phase,
         "target": loop.target,
-        "factors": loop.factors,
-        "receive_tile": loop.receive_tile,
-        "extent": loop.extent,
-        "instance_path": loop.instance_path,
     }
-    if loop.scope_type:
-        result["scope_type"] = loop.scope_type
-    if loop.children:
-        result["children"] = [_loop_json(child) for child in loop.children]
-    if loop.ops:
-        result["ops"] = loop.ops
+
+
+def _loop_block_json(block: LoopBlock) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "kind": block.kind,
+        "target": block.target,
+        "loops": [_loop_descriptor_json(loop) for loop in block.loops],
+    }
+    if block.tile_kind:
+        result["tile_kind"] = block.tile_kind
+    if block.scope_type:
+        result["scope_type"] = block.scope_type
+    if block.children:
+        result["children"] = [_loop_block_json(child) for child in block.children]
     return result
+
+
+def _loop_program_json(program: LoopProgram) -> dict[str, Any]:
+    return {
+        "dimensions": program.dimensions,
+        "instance": program.instance,
+        "root": _loop_block_json(program.root),
+    }
 
 
 def _arch_graph_json(graph: ArchGraph) -> dict[str, Any]:
@@ -68,12 +93,12 @@ def _arch_graph_json(graph: ArchGraph) -> dict[str, Any]:
                 "kind": node.kind,
                 "class": node.class_name,
                 "role": node.role,
+                "count": node.count,
                 "attributes": node.attributes,
                 "contains": [
                     {"ref": child.ref, "count": child.count}
                     for child in node.contains
                 ],
-                "roles": node.roles,
             }
             for node in graph.nodes.values()
         ],
@@ -125,7 +150,9 @@ def main() -> None:
     if args.arch:
         arch_graph = build_arch_graph(load_yaml(args.arch))
         routes = route_edges_to_paths(mapping_ops, edges, arch_graph)
+        loop_program = compile_loop_program(map_yaml, problem, arch_graph)
         result["arch_graph"] = _arch_graph_json(arch_graph)
-        result["loops"] = _loop_json(compile_mapping_loops(map_yaml, arch_graph))
+        result["loop_program"] = _loop_program_json(loop_program)
+        result["loop_pseudocode"] = render_loop_pseudocode(loop_program)
         result["routes"] = [_route_json(route) for route in routes]
-    print(json.dumps(result, indent=2))
+    print(result["loop_pseudocode"])

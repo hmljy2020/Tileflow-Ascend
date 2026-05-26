@@ -1,69 +1,65 @@
 architecture:
-  # Pure data graph plus concept hierarchy for TileFlow-Ascend.
-  # Resource nodes participate in data routing. Concept nodes describe
+  # Resource instance nodes participate in data routing. Concept nodes describe
   # placement domains and multiplicity for spatial tile decomposition.
-  version: 0.5-ascend-concept-graph
+  version: 0.6-ascend-split-concept-graph
 
   nodes:
   - name: GM
     kind: buffer
     class: DRAM
     role: out
+    count: 1
     attributes:
-      word-bits: 16
+      size: 17179869184
 
   - name: L1
     kind: buffer
     class: SRAM
+    count: 1
     attributes:
-      word-bits: 16
+      size: 1048576
 
   - name: L0
     kind: buffer
     class: SRAM
+    count: 1
     attributes:
-      word-bits: 16
+      size: 65536
 
   - name: UB
     kind: buffer
     class: SRAM
+    count: 1
     attributes:
-      word-bits: 16
+      size: 262144
 
   - name: Cube
     kind: compute
     class: Cube
+    count: 1
     attributes:
       primitive: matmul16x16x16
 
   - name: Vec
     kind: compute
     class: Vec
+    count: 1
     attributes:
       primitive: elementwise_exp
 
+  concepts:
   - name: CubeCore
-    kind: concept
     contains:
     - ref: L1
     - ref: L0
     - ref: Cube
-    roles:
-      input_buffer: L1
-      compute_buffer: L0
-      compute: Cube
 
   - name: VecCore
-    kind: concept
     contains:
     - ref: UB
     - ref: Vec
-    roles:
-      compute_buffer: UB
-      compute: Vec
 
   - name: AICore
-    kind: concept
     contains:
     - ref: CubeCore
       count: 1
@@ -71,14 +67,11 @@ architecture:
       count: 2
 
   - name: Device
-    kind: concept
     contains:
     - ref: GM
       count: 1
     - ref: AICore
       count: 24
-    roles:
-      global_buffer: GM
 
   edges:
   - name: gm_to_l1

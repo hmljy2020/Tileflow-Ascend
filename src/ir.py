@@ -33,6 +33,8 @@ class TensorEdge:
 class ProblemInfo:
     inputs: list[str]
     outputs: list[str]
+    dimensions: list[str]
+    instance: dict[str, int]
     ops: dict[str, OpInfo]
 
 
@@ -48,9 +50,9 @@ class ArchNode:
     kind: str
     class_name: str
     role: str
+    count: int
     attributes: dict[str, Any]
     contains: list[ConceptChild]
-    roles: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -83,13 +85,29 @@ class RoutedTensorEdge:
 
 
 @dataclass(frozen=True)
-class LoopInfo:
+class LoopDescriptor:
+    dimension: str
+    start: int
+    end: Any
+    step: Any
+    var: str
+    spacetime: str
+    phase: str
+    target: str
+
+
+@dataclass(frozen=True)
+class LoopBlock:
     kind: str
     target: str
-    factors: dict[str, Any]
-    receive_tile: dict[str, Any]
-    extent: int | None
-    instance_path: str
+    loops: list[LoopDescriptor]
+    tile_kind: str = ""
     scope_type: str = ""
-    children: list["LoopInfo"] | None = None
-    ops: list[str] | None = None
+    children: list["LoopBlock"] | None = None
+
+
+@dataclass(frozen=True)
+class LoopProgram:
+    root: LoopBlock
+    dimensions: list[str]
+    instance: dict[str, int]
