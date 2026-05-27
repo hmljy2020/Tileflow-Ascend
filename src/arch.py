@@ -203,6 +203,11 @@ def build_arch_graph(arch_yaml: dict[str, Any]) -> ArchGraph:
             raise ValueError(f"architecture.edges[{index}].to must name an existing resource node")
         if not isinstance(kind, str):
             raise ValueError(f"architecture.edges[{index}].kind must be a string")
+        if kind == "compute":
+            if graph.resource_nodes[src].kind != "compute":
+                raise ValueError(f"architecture.edges[{index}].from must be a compute node")
+            if graph.resource_nodes[dst].kind != "buffer":
+                raise ValueError(f"architecture.edges[{index}].to must be a buffer node")
         if name is None:
             name = f"{src}->{dst}"
         if not isinstance(name, str):
@@ -324,25 +329,50 @@ def route_edges_to_paths(
 ) -> list[RoutedTensorEdge]:
     op_locations = {op.name: op.placement for op in mapping_ops}
 
-    def endpoint_location(kind: str, name: str) -> str:
+    def op_compute_location(name: str, role: str) -> str:
+        location = op_locations.get(name, "")
+        if not location:
+            raise ValueError(f"No placement found for op '{name}'")
+        node = graph.nodes.get(location)
+        if node is None:
+            raise ValueError(f"Placement '{location}' for op '{name}' is not in arch graph")
+        if node.kind != "buffer":
+            raise ValueError(f"Placement '{location}' for op '{name}' must be a buffer")
+
+        if role == "producer":
+            candidates = [
+                edge.src
+                for edge in graph.edges
+                if edge.kind == "compute"
+                and edge.dst == location
+                and graph.resource_nodes[edge.src].kind == "compute"
+            ]
+        elif role == "consumer":
+            candidates = [
+                edge.dst
+                for edge in graph.adj.get(location, [])
+                if graph.resource_nodes[edge.dst].kind == "compute"
+            ]
+        else:
+            raise ValueError(f"Unsupported op endpoint role '{role}'")
+
+        if len(candidates) != 1:
+            raise ValueError(
+                f"Placement '{location}' for op '{name}' must connect to exactly one compute node"
+            )
+        return candidates[0]
+
+    def endpoint_location(kind: str, name: str, role: str) -> str:
         if kind == "global":
             return graph.out_node
         if kind == "op":
-            location = op_locations.get(name, "")
-            if not location:
-                raise ValueError(f"No placement found for op '{name}'")
-            node = graph.nodes.get(location)
-            if node is None:
-                raise ValueError(f"Placement '{location}' for op '{name}' is not in arch graph")
-            if node.kind != "buffer":
-                raise ValueError(f"Placement '{location}' for op '{name}' must be a buffer")
-            return location
+            return op_compute_location(name, role)
         raise ValueError(f"Unsupported endpoint kind '{kind}'")
 
     routes: list[RoutedTensorEdge] = []
     for edge in tensor_edges:
-        src = endpoint_location(edge.producer_kind, edge.producer_name)
-        dst = endpoint_location(edge.consumer_kind, edge.consumer_name)
+        src = endpoint_location(edge.producer_kind, edge.producer_name, "producer")
+        dst = endpoint_location(edge.consumer_kind, edge.consumer_name, "consumer")
         transfers = route_shortest_path(graph, src, dst)
         path = [src]
         path.extend(transfer.dst for transfer in transfers)

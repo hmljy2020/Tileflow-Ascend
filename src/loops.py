@@ -4,10 +4,12 @@ from typing import Any
 
 from .ir import (
     ArchGraph,
+    LoopAccess,
     LoopBlock,
     LoopDescriptor,
     LoopProgram,
     ProblemInfo,
+    RoutedTensorEdge,
 )
 from .parsers import _parse_factor_map
 
@@ -56,12 +58,37 @@ def compile_loop_program(
     map_yaml: dict[str, Any],
     problem: ProblemInfo,
     graph: ArchGraph,
+    routes: list[RoutedTensorEdge] | None = None,
 ) -> LoopProgram:
     mapping = map_yaml.get("mapping")
     if not isinstance(mapping, dict):
         raise ValueError("map YAML must contain a 'mapping' mapping")
 
     var_counts: dict[str, int] = {}
+    access_by_target: dict[str, list[LoopAccess]] = {}
+
+    edge_by_transfer = {
+        (edge.src, edge.dst, edge.name): edge
+        for edge in graph.edges
+    }
+    for route in routes or []:
+        for index, transfer_name in enumerate(route.transfers):
+            if index + 1 >= len(route.path):
+                continue
+            src = route.path[index]
+            dst = route.path[index + 1]
+            transfer = edge_by_transfer.get((src, dst, transfer_name))
+            if transfer is None or transfer.kind not in {"load", "store", "bypass", "compute"}:
+                continue
+            access_by_target.setdefault(dst, []).append(
+                LoopAccess(
+                    action=transfer.kind,
+                    tensor=route.edge.tensor,
+                    src=src,
+                    dst=dst,
+                    transfer=transfer.name,
+                )
+            )
 
     def make_var(dimension: str) -> str:
         index = var_counts.get(dimension, 0)
@@ -152,6 +179,7 @@ def compile_loop_program(
             return LoopBlock(
                 kind="tile",
                 target=target,
+                accesses=access_by_target.get(target) if target in graph.resource_nodes else None,
                 tile_kind=tile_kind,
                 loops=loops,
                 children=children,
@@ -207,6 +235,31 @@ def compile_loop_program(
 
 
 def render_loop_pseudocode(program: LoopProgram) -> str:
+    target_paths: dict[str, list[list[str]]] = {}
+
+    def collect_target_paths(block: LoopBlock, path: list[str]) -> None:
+        next_path = path
+        if block.kind == "tile":
+            next_path = path + [block.target]
+            target_paths.setdefault(block.target, []).append(next_path)
+        for child in block.children or []:
+            collect_target_paths(child, next_path)
+
+    collect_target_paths(program.root, [])
+
+    def is_ancestor(ancestor: str, target: str) -> bool:
+        for path in target_paths.get(target, []):
+            if ancestor in path[:-1]:
+                return True
+        return False
+
+    def is_before_dispatch(access: LoopAccess) -> bool:
+        if access.action == "load":
+            return True
+        if access.action == "bypass":
+            return not is_ancestor(access.dst, access.src)
+        return False
+
     def indent_line(level: int, text: str) -> str:
         return f"{'    ' * level}{text}"
 
@@ -224,6 +277,23 @@ def render_loop_pseudocode(program: LoopProgram) -> str:
             f"{prefix} {loop.var} in range({loop.start}, {loop.end}, {loop.step}):"
             f"  # {comment}"
         )
+
+    def access_lines(
+        block: LoopBlock,
+        level: int,
+        before_dispatch: bool,
+    ) -> list[str]:
+        groups: dict[tuple[str, str], list[str]] = {}
+        for access in block.accesses or []:
+            if is_before_dispatch(access) != before_dispatch:
+                continue
+            key = (access.action, access.src)
+            groups.setdefault(key, []).append(access.tensor)
+        lines: list[str] = []
+        for (action, src), tensors in groups.items():
+            tensor_text = ", ".join(dict.fromkeys(tensors))
+            lines.append(indent_line(level, f"# {action} {tensor_text} from {src}"))
+        return lines
 
     def wrap_phase(
         block: LoopBlock,
@@ -261,12 +331,13 @@ def render_loop_pseudocode(program: LoopProgram) -> str:
             return lines + child_lines
 
         if block.kind == "tile":
-            lines: list[str] = []
+            lines = access_lines(block, level, before_dispatch=False)
             for child in block.children or []:
                 lines.extend(emit(child, level))
             if not lines:
                 lines = [indent_line(level, "pass")]
             lines = wrap_phase(block, "dispatch", lines, level)
+            lines = access_lines(block, level, before_dispatch=True) + lines
             lines = wrap_phase(block, "receive", lines, level)
             return lines
 

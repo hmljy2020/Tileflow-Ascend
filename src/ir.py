@@ -97,10 +97,20 @@ class LoopDescriptor:
 
 
 @dataclass(frozen=True)
+class LoopAccess:
+    action: str
+    tensor: str
+    src: str
+    dst: str
+    transfer: str
+
+
+@dataclass(frozen=True)
 class LoopBlock:
     kind: str
     target: str
     loops: list[LoopDescriptor]
+    accesses: list[LoopAccess] | None = None
     tile_kind: str = ""
     scope_type: str = ""
     children: list["LoopBlock"] | None = None

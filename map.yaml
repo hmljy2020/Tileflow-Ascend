@@ -28,7 +28,7 @@ mapping:
       - node-type: Tile
         type: temporal
         target: L1
-        receive_tile: M=256 N=128 D=64
+        receive_tile: M=512 N=128 D=64
         factors: M=256 N=128 D=64
 
         subtree:

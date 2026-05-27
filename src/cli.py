@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import argparse
 from typing import Any
 
@@ -13,6 +14,7 @@ from .arch import (
 )
 from .ir import (
     ArchGraph,
+    LoopAccess,
     LoopBlock,
     LoopDescriptor,
     LoopProgram,
@@ -60,12 +62,24 @@ def _loop_descriptor_json(loop: LoopDescriptor) -> dict[str, Any]:
     }
 
 
+def _loop_access_json(access: LoopAccess) -> dict[str, str]:
+    return {
+        "action": access.action,
+        "tensor": access.tensor,
+        "src": access.src,
+        "dst": access.dst,
+        "transfer": access.transfer,
+    }
+
+
 def _loop_block_json(block: LoopBlock) -> dict[str, Any]:
     result: dict[str, Any] = {
         "kind": block.kind,
         "target": block.target,
         "loops": [_loop_descriptor_json(loop) for loop in block.loops],
     }
+    if block.accesses:
+        result["accesses"] = [_loop_access_json(access) for access in block.accesses]
     if block.tile_kind:
         result["tile_kind"] = block.tile_kind
     if block.scope_type:
@@ -150,9 +164,10 @@ def main() -> None:
     if args.arch:
         arch_graph = build_arch_graph(load_yaml(args.arch))
         routes = route_edges_to_paths(mapping_ops, edges, arch_graph)
-        loop_program = compile_loop_program(map_yaml, problem, arch_graph)
+        loop_program = compile_loop_program(map_yaml, problem, arch_graph, routes)
         result["arch_graph"] = _arch_graph_json(arch_graph)
         result["loop_program"] = _loop_program_json(loop_program)
         result["loop_pseudocode"] = render_loop_pseudocode(loop_program)
         result["routes"] = [_route_json(route) for route in routes]
+    print(json.dumps(result["routes"], indent=2))
     print(result["loop_pseudocode"])

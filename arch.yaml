@@ -84,6 +84,16 @@ architecture:
     to: L0
     kind: load
 
+  - name: l0_to_cube
+    from: L0
+    to: Cube
+    kind: load
+
+  - name: cube_to_l0
+    from: Cube
+    to: L0
+    kind: compute
+
   - name: l0_to_gm_bypass
     from: L0
     to: GM
@@ -93,6 +103,16 @@ architecture:
     from: GM
     to: UB
     kind: load
+
+  - name: ub_to_vec
+    from: UB
+    to: Vec
+    kind: load
+
+  - name: vec_to_ub
+    from: Vec
+    to: UB
+    kind: compute
 
   - name: ub_to_gm
     from: UB
